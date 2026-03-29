@@ -22,6 +22,11 @@ from visualizations import (
     predicted_vs_actual,
     soil_nutrients_vs_yield,
     yield_distribution_by_crop,
+    temperature_vs_yield,
+    avg_yield_by_season,
+    rainfall_distribution,
+    irrigation_yield_comparison,
+    crop_area_pie,
 )
 
 # ── Page Config ────────────────────────────────────────────────────────────────
@@ -122,13 +127,22 @@ st.markdown("""
     .shap-negative { background: #fef2f2; color: #991b1b; }
     .shap-icon { margin-right: 0.6rem; font-size: 1.1rem; }
 
-    /* Sidebar */
+    /* Sidebar — force readable text in both light and dark mode */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+        background: linear-gradient(180deg, #0f1b15 0%, #132a1c 100%) !important;
+    }
+    section[data-testid="stSidebar"] * {
+        color: #e2e8f0 !important;
+    }
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] .stRadio label,
+    section[data-testid="stSidebar"] span {
+        color: #e2e8f0 !important;
     }
     section[data-testid="stSidebar"] .stButton>button {
         background: linear-gradient(135deg, #059669, #10b981);
-        color: white;
+        color: white !important;
         border: none;
         border-radius: 10px;
         padding: 0.6rem 1.2rem;
@@ -160,6 +174,18 @@ st.markdown("""
         border-radius: 12px;
         padding: 1.5rem;
         margin-bottom: 1rem;
+    }
+    .about-card h4 {
+        color: #1e293b !important;
+        margin: 0 0 0.5rem;
+    }
+    .about-card p,
+    .about-card li,
+    .about-card strong {
+        color: #334155 !important;
+    }
+    .about-card strong {
+        color: #0f172a !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -303,6 +329,68 @@ if st.session_state.single_input is not None and input_mode == "Manual Entry For
         c3.markdown(f'<div class="metric-card profit-{"positive" if profit["net_profit"] >=0 else "negative"}"><div class="label">Net Profit</div><div class="value">₹{profit["net_profit"]:,.0f}</div></div>', unsafe_allow_html=True)
         c4.markdown(f'<div class="metric-card"><div class="label">Profit / Hectare</div><div class="value">₹{profit["profit_per_ha"]:,.0f}</div></div>', unsafe_allow_html=True)
 
+        # ── Before vs After Revenue Comparison ──
+        st.markdown("### 📊 Revenue: Before vs After Recommendations")
+        st.markdown("_This chart shows your **current estimated revenue** vs the **projected revenue if you implement all AgroIntel recommendations**._")
+        
+        before_rev = profit["revenue"]
+        after_rev = profit["improved_profit"] + profit["total_cost"]  # improved revenue
+        before_profit = profit["net_profit"]
+        after_profit = profit["improved_profit"]
+        
+        import plotly.graph_objects as go
+        fig_ba = go.Figure(data=[
+            go.Bar(name="Before (Current)", x=["Revenue", "Net Profit"], y=[before_rev, before_profit],
+                   marker_color=["#f97316", "#f97316"], text=[f"₹{before_rev:,.0f}", f"₹{before_profit:,.0f}"], textposition="outside"),
+            go.Bar(name="After (Optimized)", x=["Revenue", "Net Profit"], y=[after_rev, after_profit],
+                   marker_color=["#10b981", "#10b981"], text=[f"₹{after_rev:,.0f}", f"₹{after_profit:,.0f}"], textposition="outside"),
+        ])
+        fig_ba.update_layout(
+            barmode="group", template="plotly_white", height=420,
+            title=f"Financial Impact of Implementing Recommendations ({input_data['Crop_Type']})",
+            yaxis_title="Amount (₹)",
+            margin=dict(l=10, r=10, t=50, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        st.plotly_chart(fig_ba, use_container_width=True)
+        
+        if profit["improvement_pct"] > 0:
+            st.success(f"💡 **Potential Uplift:** By following our recommendations, you could increase your profit by **₹{profit['profit_uplift']:,.0f}** (+{profit['improvement_pct']}%).")
+        else:
+            st.info("✅ Your current parameters are already optimized. No improvement actions needed.")
+        
+        # ── Cross-Crop Profit Comparison ──
+        st.markdown("### 🌾 Profit Comparison Across All Crops")
+        st.markdown("_Estimated profit if the **same farm conditions** were applied to different crops (for the same area and market prices)._")
+        from src.profit_estimator import MARKET_PRICES, BASE_COST_PER_HA
+        crop_names = list(MARKET_PRICES.keys())
+        crop_revenues = []
+        crop_costs = []
+        crop_profits = []
+        for crop in crop_names:
+            rev = predicted_yield * input_data["Area_ha"] * MARKET_PRICES[crop]
+            cost = BASE_COST_PER_HA[crop] * input_data["Area_ha"]
+            crop_revenues.append(rev)
+            crop_costs.append(cost)
+            crop_profits.append(rev - cost)
+        
+        fig_crop = go.Figure(data=[
+            go.Bar(name="Revenue", x=crop_names, y=crop_revenues, marker_color="#3b82f6",
+                   text=[f"₹{v:,.0f}" for v in crop_revenues], textposition="outside"),
+            go.Bar(name="Cost", x=crop_names, y=crop_costs, marker_color="#ef4444",
+                   text=[f"₹{v:,.0f}" for v in crop_costs], textposition="outside"),
+            go.Bar(name="Net Profit", x=crop_names, y=crop_profits, marker_color="#10b981",
+                   text=[f"₹{v:,.0f}" for v in crop_profits], textposition="outside"),
+        ])
+        fig_crop.update_layout(
+            barmode="group", template="plotly_white", height=450,
+            title="Revenue, Cost & Net Profit by Crop Type",
+            xaxis_title="Crop", yaxis_title="Amount (₹)",
+            margin=dict(l=10, r=10, t=50, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        st.plotly_chart(fig_crop, use_container_width=True)
+
     with tabs[3]:
         st.markdown("## 📊 Historical Data Insights")
         st.plotly_chart(yield_vs_rainfall(training_df), use_container_width=True)
@@ -335,33 +423,132 @@ elif st.session_state.prediction_df is not None and input_mode == "Batch Upload 
         
     with tabs[1]:
         st.markdown("## 💡 Aggregate Recommendations")
-        st.markdown("Reviewing the batch to identify widespread issues...")
+        st.markdown("A full portfolio-level analysis of your uploaded farms, with **business impact** for each issue detected.")
+        n = len(pred_df)
+        found_any = False
         
-        # Simple aggregate logic
+        # ── 1. Nitrogen ──
         low_n = len(pred_df[pred_df["Nitrogen"] < 40]) if "Nitrogen" in pred_df.columns else 0
-        low_p = len(pred_df[pred_df["Phosphorus"] < 30]) if "Phosphorus" in pred_df.columns else 0
-        low_k = len(pred_df[pred_df["Potassium"] < 30]) if "Potassium" in pred_df.columns else 0
-        
         if low_n > 0:
-            st.warning(f"🧪 **{low_n} farms ({low_n/len(pred_df)*100:.1f}%)** have critically **Low Nitrogen**. Consider bulk purchasing Urea.")
+            found_any = True
+            st.error(f"""🧪 **Low Nitrogen — {low_n} farms ({low_n/n*100:.1f}%)**  
+            ⚙️ **Action:** Bulk purchase Urea @ 50–80 kg/ha for affected farms.  
+            💼 **Business Impact:** Nitrogen is the single largest driver of vegetative growth. Correcting this deficiency can boost yields by **10–15%**, directly increasing gross revenue by an estimated ₹2,000–₹4,000 per hectare per season.""")
+        
+        # ── 2. Phosphorus ──
+        low_p = len(pred_df[pred_df["Phosphorus"] < 30]) if "Phosphorus" in pred_df.columns else 0
         if low_p > 0:
-            st.warning(f"🧪 **{low_p} farms ({low_p/len(pred_df)*100:.1f}%)** have **Low Phosphorus**. Consider applying DAP.")
+            found_any = True
+            st.error(f"""🧪 **Low Phosphorus — {low_p} farms ({low_p/n*100:.1f}%)**  
+            ⚙️ **Action:** Apply DAP (Diammonium Phosphate) @ 40–60 kg/ha.  
+            💼 **Business Impact:** Phosphorus deficiency stunts root development, reducing both yield quality and quantity. Fertilizer correction costs ~₹1,200/ha but recovers an estimated **₹3,000–₹5,000/ha** in additional revenue.""")
+        
+        # ── 3. Potassium ──
+        low_k = len(pred_df[pred_df["Potassium"] < 30]) if "Potassium" in pred_df.columns else 0
         if low_k > 0:
-            st.info(f"🧪 **{low_k} farms ({low_k/len(pred_df)*100:.1f}%)** have **Low Potassium**.")
-            
-        st.markdown("For individual farm recommendations, please use the Manual mode.")
+            found_any = True
+            st.warning(f"""🧪 **Low Potassium — {low_k} farms ({low_k/n*100:.1f}%)**  
+            ⚙️ **Action:** Apply MOP (Muriate of Potash) @ 30–50 kg/ha.  
+            💼 **Business Impact:** Low Potassium weakens plant immunity, increasing vulnerability to diseases and pests. Correction reduces crop-loss risk by up to **20%**, protecting the existing revenue baseline.""")
+        
+        # ── 4. Soil pH ──
+        if "pH" in pred_df.columns:
+            acidic = len(pred_df[pred_df["pH"] < 5.5])
+            alkaline = len(pred_df[pred_df["pH"] > 7.5])
+            if acidic > 0:
+                found_any = True
+                st.error(f"""⚗️ **Acidic Soil (pH < 5.5) — {acidic} farms ({acidic/n*100:.1f}%)**  
+                ⚙️ **Action:** Apply agricultural lime (CaCO₃) @ 2–4 tons/ha.  
+                💼 **Business Impact:** Acidic soil locks out N, P, K nutrients. Liming is a one-time cost of ~₹3,000/ha that unlocks **₹8,000–₹12,000/ha of hidden yield potential** over 2–3 seasons.""")
+            if alkaline > 0:
+                found_any = True
+                st.warning(f"""⚗️ **Alkaline Soil (pH > 7.5) — {alkaline} farms ({alkaline/n*100:.1f}%)**  
+                ⚙️ **Action:** Apply gypsum (CaSO₄) @ 2–5 tons/ha.  
+                💼 **Business Impact:** High pH causes iron and zinc deficiency. Correcting it can improve grain quality, potentially qualifying for premium market pricing (+5–10% revenue uplift).""")
+        
+        # ── 5. Low Rainfall / Irrigation ──
+        if "Rainfall_mm" in pred_df.columns:
+            low_rain = len(pred_df[pred_df["Rainfall_mm"] < 600])
+            if low_rain > 0:
+                found_any = True
+                st.error(f"""💧 **Low Rainfall (< 600mm) — {low_rain} farms ({low_rain/n*100:.1f}%)**  
+                ⚙️ **Action:** Deploy drip or sprinkler irrigation systems on affected farms.  
+                💼 **Business Impact:** Farms without sufficient water lose up to **40% of potential yield**. A ₹5,000/ha irrigation investment can recover ₹15,000–₹25,000/ha in saved revenue per season.""")
+        
+        # ── 6. High Humidity → Disease Risk ──
+        if "Humidity_pct" in pred_df.columns:
+            high_hum = len(pred_df[pred_df["Humidity_pct"] > 85])
+            if high_hum > 0:
+                found_any = True
+                st.warning(f"""🦠 **High Humidity (> 85%) — {high_hum} farms ({high_hum/n*100:.1f}%)**  
+                ⚙️ **Action:** Increase monitoring for fungal diseases (blast, blight). Apply preventive fungicide.  
+                💼 **Business Impact:** Unchecked fungal infections in humid conditions cause 15–30% crop loss. Preventive fungicide costs ~₹800/ha but prevents potential losses of ₹5,000–₹10,000/ha.""")
+        
+        # ── 7. High Temperature Stress ──
+        if "Temperature_C" in pred_df.columns:
+            high_temp = len(pred_df[pred_df["Temperature_C"] > 38])
+            if high_temp > 0:
+                found_any = True
+                st.warning(f"""🌡️ **Heat Stress (> 38°C) — {high_temp} farms ({high_temp/n*100:.1f}%)**  
+                ⚙️ **Action:** Use mulching and adjust sowing dates to avoid peak heat. Consider heat-tolerant crop varieties.  
+                💼 **Business Impact:** Every 1°C above optimum during the flowering stage can reduce grain yield by 5–8%. Switching to heat-tolerant varieties stabilizes revenue in volatile climates.""")
+        
+        # ── 8. Crop Diversification ──
+        if "Crop_Type" in pred_df.columns:
+            dominant_crop = pred_df["Crop_Type"].value_counts()
+            if len(dominant_crop) > 0:
+                top_crop = dominant_crop.index[0]
+                top_pct = dominant_crop.iloc[0] / n * 100
+                if top_pct > 50:
+                    found_any = True
+                    st.info(f"""🌱 **Low Crop Diversity — {top_pct:.1f}% farms grow {top_crop}**  
+                    ⚙️ **Action:** Encourage crop rotation and diversification (e.g., alternate with legumes like Soybean for natural nitrogen fixation).  
+                    💼 **Business Impact:** Monoculture increases soil degradation and market-price risk. Diversification reduces input costs by 10–15% over 3 years (natural nutrient replenishment) and protects against single-commodity price crashes.""")
+        
+        # ── 9. Underperforming Yield Alert ──
+        if "Predicted_Yield_ton_per_ha" in pred_df.columns and "Crop_Type" in pred_df.columns:
+            median_yields = {"Rice": 4.2, "Wheat": 3.2, "Maize": 4.8, "Cotton": 1.9, "Sugarcane": 65.0, "Soybean": 2.3}
+            underperf_count = 0
+            for _, row in pred_df.iterrows():
+                crop = row.get("Crop_Type", "")
+                pred_y = row.get("Predicted_Yield_ton_per_ha", 0)
+                med = median_yields.get(crop, 0)
+                if med > 0 and pred_y < med * 0.7:
+                    underperf_count += 1
+            if underperf_count > 0:
+                found_any = True
+                st.error(f"""📉 **Underperforming Farms — {underperf_count} farms ({underperf_count/n*100:.1f}%) predicted below 70% of median yield**  
+                ⚙️ **Action:** Conduct a detailed soil test and consider switching to higher-yield crop alternatives (e.g., Maize instead of Cotton, Soybean instead of Wheat).  
+                💼 **Business Impact:** Each underperforming farm is leaving 30%+ potential revenue on the table. Strategic crop switching alone can uplift per-hectare income by ₹8,000–₹15,000 without additional infrastructure cost.""")
+        
+        if not found_any:
+            st.success("✅ **All Parameters Look Good!** No widespread issues found across the uploaded dataset. Current farming practices are within optimal ranges.")
+        
+        st.markdown("---")
+        st.markdown("_For detailed individual farm analysis with SHAP feature explanations, switch to **Manual Entry** mode._")
 
     with tabs[2]:
         st.markdown("## 💰 Batch Financial Valuation")
         st.info("💡 Revenue estimations are based on current average market prices per ton (e.g. Rice: ₹22,000/ton, Wheat: ₹25,000/ton, Cotton: ₹55,000/ton).")
-        # Calculate profit for the whole batch
-        total_rev = 0
-        total_cost = 0
+        # Calculate profit for the whole batch — use safe defaults for missing columns
+        total_rev = 0.0
+        total_cost = 0.0
         for i, row in pred_df.iterrows():
-            rec = generate_recommendations(row.to_dict(), row["Predicted_Yield_ton_per_ha"])
-            prof = estimate_profit(row.to_dict(), row["Predicted_Yield_ton_per_ha"], rec)
-            total_rev += prof["revenue"]
-            total_cost += prof["total_cost"]
+            row_dict = row.to_dict()
+            # Ensure required keys have safe default values
+            if "Crop_Type" not in row_dict or pd.isna(row_dict.get("Crop_Type")):
+                row_dict["Crop_Type"] = "Rice"
+            if "Area_ha" not in row_dict or pd.isna(row_dict.get("Area_ha")):
+                row_dict["Area_ha"] = 1.0
+            pred_yield = row.get("Predicted_Yield_ton_per_ha", 0)
+            if pd.isna(pred_yield):
+                pred_yield = 0.0
+            rec = generate_recommendations(row_dict, pred_yield)
+            prof = estimate_profit(row_dict, pred_yield, rec)
+            rev = prof["revenue"] if not pd.isna(prof["revenue"]) else 0.0
+            cost = prof["total_cost"] if not pd.isna(prof["total_cost"]) else 0.0
+            total_rev += rev
+            total_cost += cost
             
         net_profit = total_rev - total_cost
         
@@ -370,12 +557,117 @@ elif st.session_state.prediction_df is not None and input_mode == "Batch Upload 
         c2.markdown(f'<div class="metric-card"><div class="label">Total Cost</div><div class="value">₹{total_cost:,.0f}</div></div>', unsafe_allow_html=True)
         c3.markdown(f'<div class="metric-card profit-{"positive" if net_profit >=0 else "negative"}"><div class="label">Total Net Profit</div><div class="value">₹{net_profit:,.0f}</div></div>', unsafe_allow_html=True)
         
+        # ── Per-Crop Profit Comparison Bar Chart ──
+        st.markdown("### 🌾 Profit Comparison Across Crops")
+        import plotly.graph_objects as go
+        from src.profit_estimator import MARKET_PRICES, BASE_COST_PER_HA
+        
+        # Aggregate revenue & cost per crop from the batch
+        crop_rev_map = {}
+        crop_cost_map = {}
+        crop_improved_rev_map = {}
+        for i, row in pred_df.iterrows():
+            row_dict = row.to_dict()
+            crop = row_dict.get("Crop_Type", "Rice")
+            if pd.isna(crop): crop = "Rice"
+            area = row_dict.get("Area_ha", 1.0)
+            if pd.isna(area): area = 1.0
+            pred_yield = row.get("Predicted_Yield_ton_per_ha", 0)
+            if pd.isna(pred_yield): pred_yield = 0.0
+            rec = generate_recommendations(row_dict, pred_yield)
+            prof = estimate_profit(row_dict, pred_yield, rec)
+            rev = prof["revenue"] if not pd.isna(prof["revenue"]) else 0.0
+            cost = prof["total_cost"] if not pd.isna(prof["total_cost"]) else 0.0
+            imp_rev = (prof["improved_profit"] + prof["total_cost"]) if not pd.isna(prof.get("improved_profit", 0)) else rev
+            crop_rev_map[crop] = crop_rev_map.get(crop, 0) + rev
+            crop_cost_map[crop] = crop_cost_map.get(crop, 0) + cost
+            crop_improved_rev_map[crop] = crop_improved_rev_map.get(crop, 0) + imp_rev
+        
+        crops = list(crop_rev_map.keys())
+        revenues = [crop_rev_map[c] for c in crops]
+        costs = [crop_cost_map[c] for c in crops]
+        profits = [crop_rev_map[c] - crop_cost_map[c] for c in crops]
+        
+        fig_crop = go.Figure(data=[
+            go.Bar(name="Revenue", x=crops, y=revenues, marker_color="#3b82f6",
+                   text=[f"₹{v:,.0f}" for v in revenues], textposition="outside"),
+            go.Bar(name="Cost", x=crops, y=costs, marker_color="#ef4444",
+                   text=[f"₹{v:,.0f}" for v in costs], textposition="outside"),
+            go.Bar(name="Net Profit", x=crops, y=profits, marker_color="#10b981",
+                   text=[f"₹{v:,.0f}" for v in profits], textposition="outside"),
+        ])
+        fig_crop.update_layout(
+            barmode="group", template="plotly_white", height=450,
+            title="Revenue, Cost & Net Profit by Crop Type",
+            xaxis_title="Crop", yaxis_title="Amount (₹)",
+            margin=dict(l=10, r=10, t=50, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        st.plotly_chart(fig_crop, use_container_width=True)
+        
+        # ── Before vs After Revenue Comparison ──
+        st.markdown("### 📊 Revenue: Before vs After Recommendations")
+        st.markdown("_Compares **current revenue** against **projected revenue after implementing AgroIntel's recommendations** for each crop._")
+        
+        before_vals = [crop_rev_map[c] for c in crops]
+        after_vals = [crop_improved_rev_map[c] for c in crops]
+        uplift_vals = [a - b for a, b in zip(after_vals, before_vals)]
+        
+        fig_ba = go.Figure(data=[
+            go.Bar(name="Before (Current Revenue)", x=crops, y=before_vals, marker_color="#f97316",
+                   text=[f"₹{v:,.0f}" for v in before_vals], textposition="outside"),
+            go.Bar(name="After (Optimized Revenue)", x=crops, y=after_vals, marker_color="#10b981",
+                   text=[f"₹{v:,.0f}" for v in after_vals], textposition="outside"),
+        ])
+        fig_ba.update_layout(
+            barmode="group", template="plotly_white", height=450,
+            title="Revenue Before vs After Action (Per Crop)",
+            xaxis_title="Crop", yaxis_title="Revenue (₹)",
+            margin=dict(l=10, r=10, t=50, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        st.plotly_chart(fig_ba, use_container_width=True)
+        
+        # Show total uplift
+        total_uplift = sum(uplift_vals)
+        if total_uplift > 0:
+            st.success(f"💡 **Total Revenue Uplift Potential:** By following all AgroIntel recommendations, the portfolio's revenue could increase by **₹{total_uplift:,.0f}**.")
+        else:
+            st.info("✅ Current parameters are already well-optimized. No significant improvement actions needed.")
+        
     with tabs[3]:
         st.markdown("## 📊 Batch Data Insights")
-        if "Rainfall_mm" in pred_df.columns:
-            st.plotly_chart(yield_vs_rainfall(pred_df), use_container_width=True)
-        if "Crop_Type" in pred_df.columns:
-            st.plotly_chart(yield_distribution_by_crop(pred_df), use_container_width=True)
+        # Row 1: Yield vs Rainfall + Temperature
+        col_a, col_b = st.columns(2)
+        if "Rainfall_mm" in pred_df.columns and "Yield_ton_per_ha" in pred_df.columns:
+            col_a.plotly_chart(yield_vs_rainfall(pred_df), use_container_width=True)
+        fig_temp = temperature_vs_yield(pred_df)
+        if fig_temp:
+            col_b.plotly_chart(fig_temp, use_container_width=True)
+        # Row 2: Distribution + Pie chart
+        col_c, col_d = st.columns(2)
+        if "Crop_Type" in pred_df.columns and "Yield_ton_per_ha" in pred_df.columns:
+            col_c.plotly_chart(yield_distribution_by_crop(pred_df), use_container_width=True)
+        fig_pie = crop_area_pie(pred_df)
+        if fig_pie:
+            col_d.plotly_chart(fig_pie, use_container_width=True)
+        # Row 3: Irrigation comparison + Avg Yield by Season
+        col_e, col_f = st.columns(2)
+        fig_irr = irrigation_yield_comparison(pred_df)
+        if fig_irr:
+            col_e.plotly_chart(fig_irr, use_container_width=True)
+        fig_season = avg_yield_by_season(pred_df)
+        if fig_season:
+            col_f.plotly_chart(fig_season, use_container_width=True)
+        # Row 4: Correlation Heatmap + Rainfall histogram
+        col_g, col_h = st.columns(2)
+        col_g.plotly_chart(correlation_heatmap(pred_df), use_container_width=True)
+        fig_rain = rainfall_distribution(pred_df)
+        if fig_rain:
+            col_h.plotly_chart(fig_rain, use_container_width=True)
+        # Row 5: Soil nutrients
+        if all(c in pred_df.columns for c in ["Nitrogen", "Phosphorus", "Potassium"]):
+            st.plotly_chart(soil_nutrients_vs_yield(pred_df), use_container_width=True)
 
 # ── DEFAULT VIEW ──
 else:
@@ -390,7 +682,33 @@ else:
         
     with tabs[3]:
         st.markdown("## 📊 Model Training Data Insights")
-        st.plotly_chart(yield_vs_rainfall(training_df), use_container_width=True)
+        # Row 1
+        col_a, col_b = st.columns(2)
+        col_a.plotly_chart(yield_vs_rainfall(training_df), use_container_width=True)
+        fig_temp = temperature_vs_yield(training_df)
+        if fig_temp:
+            col_b.plotly_chart(fig_temp, use_container_width=True)
+        # Row 2
+        col_c, col_d = st.columns(2)
+        col_c.plotly_chart(yield_distribution_by_crop(training_df), use_container_width=True)
+        fig_pie = crop_area_pie(training_df)
+        if fig_pie:
+            col_d.plotly_chart(fig_pie, use_container_width=True)
+        # Row 3
+        col_e, col_f = st.columns(2)
+        fig_irr = irrigation_yield_comparison(training_df)
+        if fig_irr:
+            col_e.plotly_chart(fig_irr, use_container_width=True)
+        fig_season = avg_yield_by_season(training_df)
+        if fig_season:
+            col_f.plotly_chart(fig_season, use_container_width=True)
+        # Row 4
+        col_g, col_h = st.columns(2)
+        col_g.plotly_chart(correlation_heatmap(training_df), use_container_width=True)
+        fig_rain = rainfall_distribution(training_df)
+        if fig_rain:
+            col_h.plotly_chart(fig_rain, use_container_width=True)
+        st.plotly_chart(soil_nutrients_vs_yield(training_df), use_container_width=True)
 
 # ── ABOUT TAB ──
 with tabs[4]:
